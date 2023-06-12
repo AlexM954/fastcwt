@@ -40,7 +40,6 @@
 //!
 //! Arts, L.P.A., van den Broek, E.L. The fast continuous wavelet transformation (fCWT) for real-time, high-quality, noise-resistant time–frequency analysis. Nat Comput Sci 2, 47–58 (2022). <https://doi.org/10.1038/s43588-021-00183-z>
 
-#![feature(core_intrinsics)]
 #![forbid(unsafe_code)]
 
 use rustfft;
@@ -48,8 +47,7 @@ use rayon::prelude::*;
 
 /// Scale types selection for Scale object.
 #[derive(PartialEq)]
-pub enum ScaleTypes
-{
+pub enum ScaleTypes {
     /// Linear scale.
     Linear,
     /// Logarithmic scale.
@@ -57,24 +55,22 @@ pub enum ScaleTypes
     /// Linear for frequency.
     LinFreq
 }
+
 /// Morlet wavelet object.
-pub struct Wavelet
-{
+pub struct Wavelet {
     width : usize,
     imag_freq : bool,
     double_sided : bool,
     mother : Vec<f64>,
     fb : f64
 }
-impl Wavelet
-{
+
+impl Wavelet {
     /// Create a wavelet object.
     ///
     /// bandwidth           - bandwidth of the Morlet wavelet
-    pub fn create(bandwidth : f64) -> Wavelet
-    {
-        return Wavelet
-        {
+    pub fn create(bandwidth : f64) -> Wavelet {
+        return Wavelet {
             width : 0,
             imag_freq : false,
             double_sided : false,
@@ -82,8 +78,8 @@ impl Wavelet
             fb : bandwidth
         }
     }
-    fn generate(& mut self, size : usize)
-    {
+
+    fn generate(& mut self, size : usize) {
         //Frequency domain, because we only need size. Default scale is always 2;
         self.width = size;
 
@@ -91,8 +87,7 @@ impl Wavelet
         let norm = (2.0 * std::f64::consts::PI).sqrt() * (1.0 / std::f64::consts::PI).powf(0.25);
 
         //calculate array
-        for w in 0 .. self.width
-        {
+        for w in 0 .. self.width {
             let mut tmp1 = 2.0 * (w as f64 * toradians) * self.fb - 2.0 * std::f64::consts::PI * self.fb;
             tmp1 = - tmp1.powf(2.0) / 2.0;
             self.mother.push(norm * (tmp1).exp());
@@ -101,14 +96,13 @@ impl Wavelet
 }
 
 /// Scale factor for the wavelet transform.
-pub struct Scales
-{
+pub struct Scales {
     scales : Vec<f64>,
     fs : usize,
     num_scales : usize
 }
-impl Scales
-{
+
+impl Scales {
     /// Create the scale factor for the transform.
     ///
     /// st                  - Log | Linear for logarithmic or linear distribution of scales across frequency range
@@ -120,31 +114,31 @@ impl Scales
     /// af1                 - End of the frequency range
     ///
     /// af_num              - Number of wavelets to generate across frequency range
-    pub fn create(st : ScaleTypes, afs : usize, af0 : f64, af1 : f64, af_num : usize) -> Scales
-    {
-        let mut scales = Scales
-        {
+    pub fn create(st : ScaleTypes, afs : usize, af0 : f64, af1 : f64, af_num : usize) -> Scales {
+        let mut scales = Scales {
             scales: vec![0.0; af_num],
             fs : afs,
             num_scales: af_num,
         };
-        match st
-        {
-            ScaleTypes::Linear => { scales.calculate_linscale_array(afs, af0, af1, af_num); }
-            ScaleTypes::Log => { scales.calculate_logscale_array(2.0, afs, af0, af1, af_num); }
-            ScaleTypes::LinFreq => { scales.calculate_linfreq_array(afs, af0, af1, af_num); }
+
+        match st {
+            ScaleTypes::Linear => { scales.calculate_linscale_array(afs, af0, af1, af_num);}
+            ScaleTypes::Log => { scales.calculate_logscale_array(2.0, afs, af0, af1, af_num);}
+            ScaleTypes::LinFreq => { scales.calculate_linfreq_array(afs, af0, af1, af_num);}
         }
-        return scales;
+        
+        scales
     }
-    pub fn get_scales(& self) -> Vec<f64> { return self.scales.clone(); }
-    pub fn get_frequencies(& self, p_freqs : & mut Vec<f64>) -> Vec<f64>
-    {
+
+    pub fn get_scales(& self) -> Vec<f64> {return self.scales.clone();}
+
+    pub fn get_frequencies(& self, p_freqs : & mut Vec<f64>) -> Vec<f64> {
         let mut frequencies = vec![];
-        for i in 0..p_freqs.len() { frequencies.push(self.fs as f64 / self.scales[i]); }
+        for i in 0..p_freqs.len() { frequencies.push(self.fs as f64 / self.scales[i]);}
         return frequencies;
     }
-    fn calculate_logscale_array(& mut self, base : f64, fs : usize, f0 : f64, f1 : f64, f_num : usize)
-    {
+
+    fn calculate_logscale_array(& mut self, base : f64, fs : usize, f0 : f64, f1 : f64, f_num : usize) {
         let nf0 = f0;
         let nf1 = f1;
         let s0 = fs as f64 / nf1;
@@ -157,24 +151,23 @@ impl Scales
         let power1 = s1.log(std::f64::consts::E) / base.log(std::f64::consts::E);
         let dpower = power1 - power0;
 
-        for i in 0 .. f_num
-        {
+        for i in 0 .. f_num {
             let power = power0 + dpower / ((f_num - 1) * i) as f64;
             self.scales[i] = base.powf(power);
         }
     }
-    fn calculate_linscale_array(& mut self, fs : usize, f0 : f64, f1 : f64, f_num : usize)
-    {
+
+    fn calculate_linscale_array(& mut self, fs : usize, f0 : f64, f1 : f64, f_num : usize) {
         //If a signal has fs=100hz and you want to measure [0.1-50]Hz, you need scales 2 to 1000;
 
         //Cannot pass the nyquist frequency
         assert!(f1 <= (fs / 2) as f64, "Max frequency cannot be higher than the Nyquist frequency.");
         let df = f1 - f0;
 
-        for i in 0 .. f_num { self.scales[f_num - i - 1] = fs as f64 / f0 + (df / f_num as f64) * i as f64; }
+        for i in 0 .. f_num {self.scales[f_num - i - 1] = fs as f64 / f0 + (df / f_num as f64) * i as f64;}
     }
-    fn calculate_linfreq_array(& mut self, fs : usize, f0 : f64, f1 : f64, f_num : usize)
-    {
+
+    fn calculate_linfreq_array(& mut self, fs : usize, f0 : f64, f1 : f64, f_num : usize) {
         //If a signal has fs=100hz and you want to measure [0.1-50]Hz, you need scales 2 to 1000;
         let s0 = fs as f64 / f1;
         let s1 = fs as f64 / f0;
@@ -183,35 +176,33 @@ impl Scales
         assert!(f1 <= fs as f64 / 2.0, "Max frequency cannot be higher than the Nyquist frequency.");
         let ds = s1 - s0;
 
-        for i in 0 .. f_num { self.scales[i] = s0 + (ds / f_num as f64) * i as f64; }
+        for i in 0 .. f_num {self.scales[i] = s0 + (ds / f_num as f64) * i as f64;}
     }
 }
 
 /// Actual continuous wavelet transform.
-pub struct FastCWT
-{
+pub struct FastCWT {
     wavelet : Wavelet,
     use_normalization : bool
 }
-impl FastCWT
-{
+
+impl FastCWT {
     /// # Arguments
     /// wavelet             - Wavelet object.
     ///
     /// optplan             - Use FFT optimization plans if true.
-    pub fn create(wavelet : Wavelet, optplan : bool) -> FastCWT { return FastCWT { wavelet, use_normalization : optplan, } }
+    pub fn create(wavelet : Wavelet, optplan : bool) -> FastCWT {return FastCWT {wavelet, use_normalization : optplan,}}
     /// # Arguments
     /// input     - Input data in vector format
     ///
     /// scales    - Scales object
-    pub fn cwt(& mut self, num : usize, input : & [f64], scales : Scales) -> Vec<rustfft::num_complex::Complex<f64>>
-    {
+    pub fn cwt(& mut self, num : usize, input : & [f64], scales : Scales) -> Vec<rustfft::num_complex::Complex<f64>> {
         //Find nearest power of 2
         let newsize = num.next_power_of_two();
         let mut buffer = vec![];
 
         //Copy input to new input buffer
-        for data in input { buffer.push(rustfft::num_complex::Complex::new(* data, 0.0)); }
+        for data in input {buffer.push(rustfft::num_complex::Complex::new(* data, 0.0));}
 
         let mut planner = rustfft::FftPlanner::new();
 
@@ -225,12 +216,9 @@ impl FastCWT
         let buffer = std::sync::Arc::new(std::sync::Mutex::new(Some(buffer)));
         let buffer_clone = buffer.clone();
 
-        (0 .. scales.num_scales).into_par_iter().for_each(|i|
-        {
-            if let Ok(mut guard) = buffer_clone.try_lock()
-            {
-                if let Some(buffer_clone) = guard.as_mut()
-                {
+        (0 .. scales.num_scales).into_par_iter().for_each(|i| {
+            if let Ok(mut guard) = buffer_clone.try_lock() {
+                if let Some(buffer_clone) = guard.as_mut() {
                     let mut planner = rustfft::FftPlanner::new();
                     //FFT-base convolution in the frequency domain
                     self.daughter_wavelet_multiplication(buffer_clone, self.wavelet.mother.as_slice(), scales.scales[i],num, self.wavelet.imag_freq, self.wavelet.double_sided);
@@ -240,22 +228,21 @@ impl FastCWT
                 }
             }
         });
+
         return buffer.lock().unwrap().take().unwrap();
     }
-    fn daughter_wavelet_multiplication(& self, buffer : & mut [rustfft::num_complex::Complex<f64>], mother : &[f64], scale : f64, i_size : usize, imaginary : bool, doublesided : bool)
-    {
+
+    fn daughter_wavelet_multiplication(& self, buffer : & mut [rustfft::num_complex::Complex<f64>], mother : &[f64], scale : f64, i_size : usize, imaginary : bool, doublesided : bool) {
         let endpoint = std::cmp::min((i_size as f64 / 2.0) as usize, (i_size as f64 * 2.0 / scale) as usize);
         let step = scale / 2.0;
 
         let maximum = i_size as f64 - 1.0;
         let s1 = i_size - 1;
 
-        for n in 0 .. endpoint
-        {
+        for n in 0 .. endpoint {
             let tmp = std::cmp::min(maximum as usize, step as usize * n);
 
-            if doublesided
-            {
+            if doublesided {
                 buffer[s1 - n].re = if imaginary { buffer[s1 - n].re * mother[tmp as usize] } else { buffer[s1 - n].re * mother[tmp as usize] * -1.0 };
                 buffer[s1 - n].im = buffer[s1 - n].im * mother[tmp as usize];
             } else { buffer[n].re = buffer[n].re * mother[tmp as usize]; buffer[n].im = buffer[n].im * mother[tmp as usize]; }
